@@ -69,6 +69,25 @@ static char policy_opened;
 /* global data for policy capabilities */
 static struct dentry *policycap_dir;
 
+/* Check whether a task is allowed to use a security operation. */
+static int task_has_security(struct task_struct *tsk,
+			     u32 perms)
+{
+	const struct task_security_struct *tsec;
+	u32 sid = 0;
+
+	rcu_read_lock();
+	tsec = __task_cred(tsk)->security;
+	if (tsec)
+		sid = tsec->sid;
+	rcu_read_unlock();
+	if (!tsec)
+		return -EACCES;
+
+	return avc_has_perm(sid, SECINITSID_SECURITY,
+			    SECCLASS_SECURITY, perms, NULL);
+}
+
 enum sel_inos {
 	SEL_ROOT_INO = 2,
 	SEL_LOAD,	/* load policy */
@@ -137,21 +156,31 @@ static ssize_t sel_write_enforce(struct file *file, const char __user *buf,
 		goto out;
 
 // [ SEC_SELINUX_PORTING_COMMON
-#ifdef CONFIG_ALWAYS_ENFORCE
+#ifdef CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE
 	// If build is user build and enforce option is set, selinux is always enforcing
 	new_value = 1;
-	length = avc_has_perm(current_sid(), SECINITSID_SECURITY,
-			      SECCLASS_SECURITY, SECURITY__SETENFORCE,
-			      NULL);
+	length = task_has_security(current, SECURITY__SETENFORCE);
 	audit_log(current->audit_context, GFP_KERNEL, AUDIT_MAC_STATUS,
-		"config_always_enforce - true; enforcing=%d old_enforcing=%d auid=%u ses=%u",
-		new_value, selinux_enforcing,
-		from_kuid(&init_user_ns, audit_get_loginuid(current)),
-		audit_get_sessionid(current));
+                        "config_always_enforce - true; enforcing=%d old_enforcing=%d auid=%u ses=%u",
+                        new_value, selinux_enforcing,
+                        from_kuid(&init_user_ns, audit_get_loginuid(current)),
+                        audit_get_sessionid(current));
 #if !defined(CONFIG_RKP_KDP)
 	selinux_enforcing = new_value;
 #endif
 	avc_ss_reset(0);
+	selnl_notify_setenforce(new_value);
+	selinux_status_update_setenforce(new_value);
+#elif defined(CONFIG_SECURITY_SELINUX_NEVER_ENFORCE)
+	// If build is user build and permissive option is set, selinux is always permissive
+	new_value = 0;
+	length = task_has_security(current, SECURITY__SETENFORCE);
+	audit_log(current->audit_context, GFP_KERNEL, AUDIT_MAC_STATUS,
+		"config_never_enforce - true; enforcing=%d old_enforcing=%d auid=%u ses=%u",
+		new_value, selinux_enforcing,
+		from_kuid(&init_user_ns, audit_get_loginuid(current)),
+		audit_get_sessionid(current));
+	selinux_enforcing = new_value;
 	selnl_notify_setenforce(new_value);
 	selinux_status_update_setenforce(new_value);
 #else
@@ -1927,6 +1956,12 @@ struct vfsmount *selinuxfs_mount;
 static int __init init_sel_fs(void)
 {
 	int err;
+
+// [ SEC_SELINUX_PORTING_COMMON
+#ifdef CONFIG_SECURITY_SELINUX_ALWAYS_ENFORCE
+	selinux_enabled = 1;
+#endif
+// ] SEC_SELINUX_PORTING_COMMON
 
 	if (!selinux_enabled)
 		return 0;
