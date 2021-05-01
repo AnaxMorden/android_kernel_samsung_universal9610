@@ -1,4 +1,4 @@
-diff --git a/arch/arm64/configs/universal9610_defconfig b/arch/arm64/configs/universal9610_defconfig
+diff --git a/arch/arm64/configs/exynos9610-a50_defconfig b/arch/arm64/configs/exynos9610-a50_defconfig
 index c3b0739..65ff2b9 100644
 --- a/arch/arm64/configs/universal9610_defconfig
 +++ b/arch/arm64/configs/universal9610_defconfig
